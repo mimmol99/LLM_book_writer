@@ -1,6 +1,6 @@
 # LLM_book_writer
 
-Given a title and a description an LLM  generate an entire book and save in in different format.
+Given a title and a description,the LLM generates an entire book and save in in different format.
 
 # Process flow
 
