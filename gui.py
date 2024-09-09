@@ -13,7 +13,7 @@ class BookApp:
     def __init__(self, root):
         self.root = root
         self.root.title("Book Generator")
-        self.root.geometry("400x350")
+        self.root.geometry("400x400")  # Adjusted height for additional input
         self.book_generator = BookOpenAI()
         self.create_widgets()
 
@@ -30,6 +30,12 @@ class BookApp:
         self.description_entry = tk.Text(self.root, width=50, height=5)
         self.description_entry.pack()
 
+        # Writing style input
+        self.style_label = tk.Label(self.root, text="Writing Style:")
+        self.style_label.pack(pady=(15, 5))
+        self.style_entry = tk.Entry(self.root, width=50)
+        self.style_entry.pack()
+        
         # Generate button
         self.generate_button = tk.Button(self.root, text="Generate Book", command=self.generate_book)
         self.generate_button.pack(pady=(20, 10))
@@ -53,9 +59,10 @@ class BookApp:
     def generate_book(self):
         title = self.title_entry.get().strip()
         description = self.description_entry.get("1.0", tk.END).strip()
+        writing_style = self.style_entry.get().strip()
 
-        if not title or not description:
-            messagebox.showwarning("Input Error", "Please provide both title and description.")
+        if not title or not description or not writing_style:
+            messagebox.showwarning("Input Error", "Please provide the book title, description, and writing style.")
             return
 
         self.generate_button.config(state=tk.DISABLED)
@@ -63,12 +70,12 @@ class BookApp:
         print("Generating book...")
 
         # Run book generation in a separate thread to keep GUI responsive
-        threading.Thread(target=self._generate_book_thread, args=(title, description)).start()
+        threading.Thread(target=self._generate_book_thread, args=(title, description, writing_style)).start()
 
-    def _generate_book_thread(self, title, description):
+    def _generate_book_thread(self, title, description, writing_style):
         try:
             print("Starting generation process...")
-            self.book_generator.generate_chapters(title, description)
+            self.book_generator.generate_chapters(title, description, writing_style)
             print("Chapters generated.")
             chapters = list(self.book_generator.chapters.keys())
             self.book_generator.generate_subsections(chapters)
@@ -79,7 +86,7 @@ class BookApp:
             # Update GUI after generation
             self.root.after(0, self._generation_complete)
         except Exception as e:
-            # Capture and pass the exception message
+            # Capture and handle the exception
             error_message = str(e)
             self.root.after(0, lambda: self._generation_error(error_message))
 
@@ -127,8 +134,9 @@ class BookApp:
             messagebox.showerror("Error", f"An error occurred while saving the file: {str(e)}")
             print(f"Error occurred while saving the file: {str(e)}")
 
-os.getenv("OPENAI_API_KEY")
-root = tk.Tk()
-app = BookApp(root)
-root.mainloop()
+# Start the application
+if __name__ == "__main__":
+    root = tk.Tk()
+    app = BookApp(root)
+    root.mainloop()
 

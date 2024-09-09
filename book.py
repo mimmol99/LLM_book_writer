@@ -1,10 +1,17 @@
+from docx import Document
+from dotenv import load_dotenv
 import logging
-import time
-from pydantic import BaseModel
 from openai import OpenAI
+import os
+from pathlib import Path
+from pydantic import BaseModel
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
-from docx import Document
+import time
+
+
+load_dotenv(Path("./api_key.env"))
+os.environ["OPENAI_API_KEY"] = os.getenv("OPENAI_API_KEY")
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -34,11 +41,13 @@ class BookOpenAI:
         self.chapters = {}
         self.title = ""
         self.description = ""
+        self.writing_style = ""
 
-    def generate_chapters(self, title, description):
+    def generate_chapters(self, title, description,writing_style):
         logging.info("Starting chapter generation...")
         self.title = title
         self.description = description
+        self.writing_style = writing_style
 
         self.messages = []  # Clear previous messages
 
@@ -95,22 +104,24 @@ class BookOpenAI:
         start_time = time.time()
         for chapter_title in self.chapters.keys():
             chapter_description = self.chapters[chapter_title]["description"]
+            logging.info("Starting {chapter_title} generation...")
             for subsection_title in self.chapters[chapter_title]["subsections"].keys():
                 subsection_description = self.chapters[chapter_title]["subsections"][subsection_title]["description"]
 
                 subsection_prompt = f"""\
                                     \nBook Title: '{self.title}'
                                     \nBook Description: '{self.description}'
-                                    \nChapter Title: '{chapter_title}'   
-                                    \nChapter Description: '{chapter_description}'
-                                    \nSubsection Title: '{subsection_title}'
-                                    \nSubsection Description: '{subsection_description}'
+                                    \nActual Chapter Title: '{chapter_title}'   
+                                    \nActual Chapter Description: '{chapter_description}'
+                                    \nActual Subsection Title: '{subsection_title}'
+                                    \nActual Subsection Description: '{subsection_description}'\
+                                    \nWriting style: '{self.writing_style}'\
                                     """
 
                 completion = self.client.beta.chat.completions.parse(
                     model=self.model_name,
                     messages=[
-                        {"role": "system", "content": "Given the information, generate the subsection content."},
+                        {"role": "system", "content": "Given the information, generate the Actual Subsection content."},
                         {"role": "user", "content": subsection_prompt},
                     ],
                     response_format=SubsectionContent,
