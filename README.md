@@ -15,8 +15,8 @@ Save all the content in txt,PDF or docx format
 
 # Usage
 
-'''bash
+```bash
 python3 gui.py
-'''
+```
 
 A simple gui where to insert title and description.
