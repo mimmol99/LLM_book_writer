@@ -1,6 +1,6 @@
 # LLM_book_writer
 
-Given a title and a description,the LLM generates an entire book and save in in different format.
+Given a title and a description,the LLM generates an entire book and saves it in different formats.
 
 # Process flow
 
@@ -11,7 +11,7 @@ The LLM executes these steps:
 
 # Save
 
-Save all the content in txt,PDF or docx format
+Save all the content in txt,PDF or docx format.
 
 # Usage
 
