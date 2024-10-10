@@ -15,7 +15,7 @@ class BookApp:
     def __init__(self, root):
         self.root = root
         self.root.title("Book Generator")
-        self.root.geometry("500x550")  # Adjusted height for additional input
+        self.root.geometry("500x650")  # Adjusted height for additional input
         self.book_generator = BookOpenAI()  # Initialized without target_language; will update later
         self.create_widgets()
 
@@ -47,6 +47,20 @@ class BookApp:
         self.language_entry.insert(0, "English")  # Default value
         self.language_entry.pack()
 
+        # Number of chapters input
+        self.n_chapters_label = tk.Label(self.root, text="Number of Chapters:")
+        self.n_chapters_label.pack(pady=(15, 5))
+        self.n_chapters_entry = tk.Entry(self.root, width=60)
+        self.n_chapters_entry.insert(0, "5")  # Default value
+        self.n_chapters_entry.pack()
+
+        # Number of subsections input
+        self.n_subsections_label = tk.Label(self.root, text="Number of Subsections per Chapter:")
+        self.n_subsections_label.pack(pady=(15, 5))
+        self.n_subsections_entry = tk.Entry(self.root, width=60)
+        self.n_subsections_entry.insert(0, "3")  # Default value
+        self.n_subsections_entry.pack()
+
         # Generate button
         self.generate_button = tk.Button(self.root, text="Generate Book", command=self.generate_book)
         self.generate_button.pack(pady=(20, 10))
@@ -69,6 +83,10 @@ class BookApp:
         self.save_button = tk.Button(self.root, text="Save", command=self.save, state=tk.DISABLED)
         self.save_button.pack(pady=(10, 20))
 
+        # Exit button
+        self.exit_button = tk.Button(self.root, text="Exit", command=self.root.quit)
+        self.exit_button.pack(pady=(10, 20))
+
         # Progress bar
         self.progress = ttk.Progressbar(self.root, orient=tk.HORIZONTAL, length=300, mode='indeterminate')
         self.progress.pack(pady=(10, 10))
@@ -79,8 +97,15 @@ class BookApp:
         writing_style = self.style_entry.get().strip()
         target_language = self.language_entry.get().strip()
 
-        if not title or not description or not writing_style:
-            messagebox.showwarning("Input Error", "Please provide the book title, description, and writing style.")
+        try:
+            n_chapters = int(self.n_chapters_entry.get().strip())
+            n_subsections = int(self.n_subsections_entry.get().strip())
+        except ValueError:
+            messagebox.showwarning("Input Error", "Please provide valid integers for number of chapters and subsections.")
+            return
+
+        if not title or not description or not writing_style or n_chapters <= 0 or n_subsections <= 0:
+            messagebox.showwarning("Input Error", "Please provide the book title, description, writing style, and valid numbers for chapters and subsections.")
             return
 
         # Disable the generate button and start the progress bar
@@ -91,11 +116,11 @@ class BookApp:
         # Run book generation in a separate thread to keep GUI responsive
         threading.Thread(
             target=self._generate_book_thread,
-            args=(title, description, writing_style, target_language),
+            args=(title, description, writing_style, target_language, n_chapters, n_subsections),
             daemon=True  # Ensures thread exits when main program does
         ).start()
 
-    def _generate_book_thread(self, title, description, writing_style, target_language):
+    def _generate_book_thread(self, title, description, writing_style, target_language, n_chapters, n_subsections):
         try:
             print("Starting generation process...")
 
@@ -103,11 +128,11 @@ class BookApp:
             self.book_generator = BookOpenAI(model_name="gpt-4o-mini", target_language=target_language)
 
             # Generate chapters and capture the returned list of Chapter objects
-            chapters = self.book_generator.generate_chapters(title, description, writing_style)
+            chapters = self.book_generator.generate_chapters(title, description, writing_style, n_chapters)
             print("Chapters generated.")
 
             # Generate subsections by passing the list of Chapter objects directly
-            self.book_generator.generate_subsections(chapters)
+            self.book_generator.generate_subsections(chapters, n_subsections)
             print("Subsections generated.")
 
             # Generate content

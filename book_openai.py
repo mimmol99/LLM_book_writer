@@ -8,9 +8,12 @@ from pathlib import Path
 from pydantic import BaseModel
 from reportlab.lib.pagesizes import letter
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak
+from reportlab.platypus.tableofcontents import TableOfContents
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import inch
+from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_JUSTIFY
+from reportlab.lib import colors
 import time
-
 
 # Load environment variables
 load_dotenv(Path("./api_key.env"))
@@ -157,38 +160,53 @@ class BookOpenAI:
         return chapters
 
 
-    def generate_subsections(self, chapters,n_subsections = 3):
+    def generate_subsections(self, chapters, n_subsections=3):
         """
         Generate subsections for each chapter.
 
         Args:
             chapters (list): A list of chapter titles.
+            n_subsections (int): The number of subsections to generate for each chapter.
         """
         for chapter in chapters:
             logging.info(f"Generating subsections for chapter: {chapter.title}")
             start_time = time.time()
 
-            system_message = f"Generate {n_subsections} chapter subsections."
-            user_prompt = f"Chapter Title: {chapter.title}\nChapter Description: {self.chapters[chapter.title]['description']}"
+            self.messages = []  # Clear previous messages for subsections
+            subsections = []
+            max_retries = 5  # Set a maximum number of retries
+            retries = 0
+            
+            while len(subsections) != n_subsections and retries < max_retries:
+                retries += 1
+                system_message = f"Generate {n_subsections} subsections for chapter titled '{chapter.title}'."
+                user_prompt = f"Chapter Title: {chapter.title}\nChapter Description: {self.chapters[chapter.title]['description']}"
 
-            # Translate prompts if necessary
-            if self.target_language != "english":
-                system_message = self.translate(system_message, source_language="english")
-                #user_prompt = self.translate(user_prompt, source_language="english")
+                # Translate prompts if necessary
+                if self.target_language != "english":
+                    system_message = self.translate(system_message, source_language="english")
+                    user_prompt = self.translate(user_prompt, source_language="english")
 
-            completion = self.client.beta.chat.completions.parse(
-                model=self.model_name,
-                messages=[
-                    {"role": "system", "content": system_message},
-                    {"role": "user", "content": user_prompt},
-                ],
-                response_format=Subsections,
-            )
+                completion = self.client.beta.chat.completions.parse(
+                    model=self.model_name,
+                    messages=[
+                        {"role": "system", "content": system_message},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                    response_format=Subsections,
+                )
+
+                subsections = completion.choices[0].message.parsed.subsections
+
+                if len(subsections) != n_subsections:
+                    logging.warning(f"Expected {n_subsections} subsections, but got {len(subsections)}. Retrying...")
+
+            if len(subsections) != n_subsections:
+                logging.error(f"Failed to generate exactly {n_subsections} subsections for chapter '{chapter.title}' after {max_retries} retries.")
+                # You may choose to raise an error or handle this case as needed.
+
             end_time = time.time()
             logging.info(f"Subsections for chapter '{chapter.title}' generated in {end_time - start_time:.2f} seconds")
-
-            subsections = completion.choices[0].message.parsed.subsections
-            self.messages.extend([{"role": "assistant", "content": subsection.title} for subsection in subsections])
 
             for subsection in subsections:
                 self.chapters[chapter.title]["subsections"][subsection.title] = {"description": subsection.description}
@@ -197,6 +215,7 @@ class BookOpenAI:
 
         logging.info("All subsections have been generated.")
         return chapters
+
 
     def generate_content(self):
         """
@@ -290,6 +309,7 @@ class BookOpenAI:
         logging.info(f"Content generation completed in {end_time - start_time:.2f} seconds")
 
 
+
     def save_as_pdf(self, filename):
         """
         Save the generated book as a PDF file with proper text wrapping and pagination.
@@ -312,44 +332,148 @@ class BookOpenAI:
         
         # Define styles
         styles = getSampleStyleSheet()
-        chapter_style = ParagraphStyle(
+        
+        # Title Style - Centered
+        styles.add(ParagraphStyle(
+            name='TitleCentered',
+            parent=styles['Title'],
+            alignment=TA_CENTER,
+            spaceAfter=24
+        ))
+        
+        # TOC Header - Left aligned (no longer using the word "Index")
+        styles.add(ParagraphStyle(
+            name='TOCHeader',
+            parent=styles['Heading1'],
+            alignment=TA_LEFT,
+            spaceAfter=12
+        ))
+        
+        # Chapter Title Style - Centered
+        styles.add(ParagraphStyle(
             name='ChapterTitle',
             parent=styles['Heading1'],
-            alignment=1,  # Center alignment
-            spaceAfter=12
-        )
-        subsection_style = ParagraphStyle(
+            fontSize=18,
+            leading=22,
+            spaceBefore=12,
+            spaceAfter=12,
+            alignment=TA_CENTER
+        ))
+        
+        # Subsection Title Style - Left aligned
+        styles.add(ParagraphStyle(
             name='SubsectionTitle',
             parent=styles['Heading2'],
+            fontSize=14,
+            leading=18,
             spaceBefore=12,
-            spaceAfter=6
-        )
-        content_style = styles['BodyText']
+            spaceAfter=6,
+            alignment=TA_LEFT  # Change to TA_CENTER if you prefer centered subsections
+        ))
+        
+        # Content Style - Justified
+        styles.add(ParagraphStyle(
+            name='Content',
+            parent=styles['BodyText'],
+            fontSize=12,
+            leading=15,
+            spaceAfter=12,
+            alignment=TA_JUSTIFY
+        ))
+        
+        # Create a Table of Contents
+        toc = TableOfContents()
+        toc.levelStyles = [
+            ParagraphStyle(
+                fontName='Helvetica-Bold',
+                fontSize=14,
+                name='TOCHeading1',
+                leftIndent=20,
+                firstLineIndent=-20,
+                spaceBefore=5,
+                leading=16
+            ),
+            ParagraphStyle(
+                fontName='Helvetica',
+                fontSize=12,
+                name='TOCHeading2',
+                leftIndent=40,
+                firstLineIndent=-20,
+                spaceBefore=0,
+                leading=12
+            ),
+        ]
         
         # Container for the PDF elements
         elements = []
         
+        # Add Book Title
+        elements.append(Paragraph(self.title, styles['TitleCentered']))
+        elements.append(Spacer(1, 12))
+        
+        # Add Table of Contents Header
+        elements.append(Paragraph("Table of Contents", styles['TOCHeader']))
+        elements.append(Spacer(1, 12))
+        
+        # Add the Table of Contents
+        elements.append(toc)
+        elements.append(PageBreak())
+        
+        # Define a callback function to capture TOC entries
+        def after_flowable(flowable):
+            """
+            Callback function to add entries to the TOC after each flowable is processed.
+            """
+            if isinstance(flowable, Paragraph):
+                text = flowable.getPlainText()
+                style = flowable.style.name
+                if style == 'ChapterTitle':
+                    # Level 0 for chapters
+                    toc.addEntry(0, text, doc.canv.getPageNumber())
+                elif style == 'SubsectionTitle':
+                    # Level 1 for subsections
+                    toc.addEntry(1, text, doc.canv.getPageNumber())
+        
+        # Assign the after_flowable callback to the DocTemplate instance
+        doc.afterFlowable = after_flowable
+        
+        # Add chapters and subsections
         for chapter_title, chapter_data in self.chapters.items():
             # Add chapter title
-            elements.append(Paragraph(chapter_title, chapter_style))
+            chapter_para = Paragraph(chapter_title, styles['ChapterTitle'])
+            elements.append(chapter_para)
             elements.append(Spacer(1, 12))
             
             for subsection_title, subsection_data in chapter_data["subsections"].items():
                 # Add subsection title
-                elements.append(Paragraph(subsection_title, subsection_style))
+                subsection_para = Paragraph(subsection_title, styles['SubsectionTitle'])
+                elements.append(subsection_para)
                 elements.append(Spacer(1, 6))
                 
-                # Add subsection content with proper wrapping
+                # Add subsection content
                 content = subsection_data['content'].replace('\n', '<br/>')  # Preserve line breaks
-                elements.append(Paragraph(content, content_style))
+                content_para = Paragraph(content, styles['Content'])
+                elements.append(content_para)
                 elements.append(Spacer(1, 12))
             
             # Add a page break after each chapter
             elements.append(PageBreak())
         
-        # Build the PDF
-        try:
-            doc.build(elements)
-            logging.info(f"PDF saved successfully as {filename} in {time.time() - start_time:.2f} seconds")
-        except Exception as e:
-            logging.error(f"Failed to save PDF: {e}")
+        # Define the page numbering callback
+        def add_page_number(canvas_obj, doc_obj):
+            """Add page number to the footer of each page, centered at the bottom."""
+            canvas_obj.saveState()
+            page_number_text = f"{doc_obj.page}"
+            canvas_obj.setFont('Helvetica', 10)
+            page_width = letter[0]  # Width of the page
+            canvas_obj.drawCentredString(page_width / 2.0, 0.5 * inch, page_number_text)
+            canvas_obj.restoreState()
+        
+        # Assign the page numbering callback
+        doc.build(
+            elements,
+            onFirstPage=add_page_number,
+            onLaterPages=add_page_number
+        )
+        
+        logging.info(f"PDF saved successfully as {filename} in {time.time() - start_time:.2f} seconds")
