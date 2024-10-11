@@ -7,10 +7,11 @@ import os
 from pathlib import Path
 from pydantic import BaseModel
 from reportlab.lib.pagesizes import letter
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak
+from reportlab.platypus import BaseDocTemplate, PageTemplate, Frame
+from reportlab.platypus import Paragraph, Spacer, PageBreak
 from reportlab.platypus.tableofcontents import TableOfContents
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib.units import inch
+from reportlab.lib.units import inch, cm
 from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_JUSTIFY
 from reportlab.lib import colors
 import time
@@ -42,6 +43,53 @@ class Subsections(BaseModel):
 
 class SubsectionContent(BaseModel):
     content: str
+
+# Custom DocTemplate
+class MyDocTemplate(BaseDocTemplate):
+    def __init__(self, filename, **kw):
+        super().__init__(filename, **kw)
+        frame = Frame(
+            x1=72,                     # 1-inch margin from the left
+            y1=72,                     # 1-inch margin from the bottom
+            width=612 - 72*2,          # Page width minus left and right margins
+            height=792 - 72*2,         # Page height minus top and bottom margins
+            id='F1'
+        )
+        template = PageTemplate('normal', [frame])
+        self.addPageTemplates(template)
+        self.toc = TableOfContents()
+        self.toc.levelStyles = [
+            ParagraphStyle(
+                fontName='Helvetica-Bold',
+                fontSize=14,
+                name='TOCHeading1',
+                leftIndent=20,
+                firstLineIndent=-20,
+                spaceBefore=5,
+                leading=16
+            ),
+            ParagraphStyle(
+                fontName='Helvetica',
+                fontSize=12,
+                name='TOCHeading2',
+                leftIndent=40,
+                firstLineIndent=-20,
+                spaceBefore=0,
+                leading=12
+            ),
+        ]
+
+    def afterFlowable(self, flowable):
+        """
+        Registers TOC entries.
+        """
+        if isinstance(flowable, Paragraph):
+            text = flowable.getPlainText()
+            style = flowable.style.name
+            if style == 'ChapterTitle':
+                self.notify('TOCEntry', (0, text, self.page))
+            elif style == 'SubsectionTitle':
+                self.notify('TOCEntry', (1, text, self.page))
 
 class BookOpenAI:
     def __init__(self, model_name="gpt-4o-mini", target_language="english"):
@@ -159,7 +207,6 @@ class BookOpenAI:
 
         return chapters
 
-
     def generate_subsections(self, chapters, n_subsections=3):
         """
         Generate subsections for each chapter.
@@ -176,7 +223,7 @@ class BookOpenAI:
             subsections = []
             max_retries = 5  # Set a maximum number of retries
             retries = 0
-            
+
             while len(subsections) != n_subsections and retries < max_retries:
                 retries += 1
                 system_message = f"Generate {n_subsections} subsections for chapter titled '{chapter.title}'."
@@ -216,7 +263,6 @@ class BookOpenAI:
         logging.info("All subsections have been generated.")
         return chapters
 
-
     def generate_content(self):
         """
         Generate content for each subsection in each chapter, making it context-aware by including previous messages and chapters.
@@ -247,15 +293,15 @@ class BookOpenAI:
                 subsection_description = subsection_data["description"]
 
                 # Build the current prompt
-                subsection_prompt =     f"""\
-                                        Book Title: '{self.title}'
-                                        Book Description: '{self.description}'
-                                        Current Chapter Title: '{chapter_title}'   
-                                        Current Chapter Description: '{chapter_description}'
-                                        Current Subsection Title: '{subsection_title}'
-                                        Current Subsection Description: '{subsection_description}'
-                                        Writing style: '{self.writing_style}'\
-                                        """
+                subsection_prompt = f"""\
+Book Title: '{self.title}'
+Book Description: '{self.description}'
+Current Chapter Title: '{chapter_title}'   
+Current Chapter Description: '{chapter_description}'
+Current Subsection Title: '{subsection_title}'
+Current Subsection Description: '{subsection_description}'
+Writing style: '{self.writing_style}'\
+"""
 
                 # Translate prompts if necessary
                 if self.target_language != "english":
@@ -304,35 +350,29 @@ class BookOpenAI:
                 except Exception as e:
                     logging.error(f"Failed to generate content for subsection '{subsection_title}': {e}")
                     self.chapters[chapter_title]["subsections"][subsection_title]["content"] = "Content generation failed."
-                    
+
         end_time = time.time()
         logging.info(f"Content generation completed in {end_time - start_time:.2f} seconds")
 
-
-
     def save_as_pdf(self, filename):
         """
-        Save the generated book as a PDF file with proper text wrapping and pagination.
+        Save the generated book as a PDF file with a dynamic Table of Contents.
 
         Args:
             filename (str): The name of the PDF file to save.
         """
         logging.info(f"Saving book as PDF: {filename}")
         start_time = time.time()
-        
-        # Create a SimpleDocTemplate for easier handling of flowables
-        doc = SimpleDocTemplate(
+
+        # Initialize the custom DocTemplate
+        doc = MyDocTemplate(
             filename,
-            pagesize=letter,
-            rightMargin=72,
-            leftMargin=72,
-            topMargin=72,
-            bottomMargin=72
+            pagesize=letter
         )
-        
+
         # Define styles
         styles = getSampleStyleSheet()
-        
+
         # Title Style - Centered
         styles.add(ParagraphStyle(
             name='TitleCentered',
@@ -340,15 +380,15 @@ class BookOpenAI:
             alignment=TA_CENTER,
             spaceAfter=24
         ))
-        
-        # TOC Header - Left aligned (no longer using the word "Index")
+
+        # TOC Header - Left aligned
         styles.add(ParagraphStyle(
             name='TOCHeader',
             parent=styles['Heading1'],
             alignment=TA_LEFT,
             spaceAfter=12
         ))
-        
+
         # Chapter Title Style - Centered
         styles.add(ParagraphStyle(
             name='ChapterTitle',
@@ -359,7 +399,7 @@ class BookOpenAI:
             spaceAfter=12,
             alignment=TA_CENTER
         ))
-        
+
         # Subsection Title Style - Left aligned
         styles.add(ParagraphStyle(
             name='SubsectionTitle',
@@ -370,7 +410,7 @@ class BookOpenAI:
             spaceAfter=6,
             alignment=TA_LEFT  # Change to TA_CENTER if you prefer centered subsections
         ))
-        
+
         # Content Style - Justified
         styles.add(ParagraphStyle(
             name='Content',
@@ -380,82 +420,41 @@ class BookOpenAI:
             spaceAfter=12,
             alignment=TA_JUSTIFY
         ))
-        
-        # Create a Table of Contents
-        toc = TableOfContents()
-        toc.levelStyles = [
-            ParagraphStyle(
-                fontName='Helvetica-Bold',
-                fontSize=14,
-                name='TOCHeading1',
-                leftIndent=20,
-                firstLineIndent=-20,
-                spaceBefore=5,
-                leading=16
-            ),
-            ParagraphStyle(
-                fontName='Helvetica',
-                fontSize=12,
-                name='TOCHeading2',
-                leftIndent=40,
-                firstLineIndent=-20,
-                spaceBefore=0,
-                leading=12
-            ),
-        ]
-        
+
         # Container for the PDF elements
-        elements = []
-        
+        story = []
+
         # Add Book Title
-        elements.append(Paragraph(self.title, styles['TitleCentered']))
-        elements.append(Spacer(1, 12))
-        
-        
-        # Add the Table of Contents
-        elements.append(toc)
-        elements.append(PageBreak())
-        
-        # Define a callback function to capture TOC entries
-        def after_flowable(flowable):
-            """
-            Callback function to add entries to the TOC after each flowable is processed.
-            """
-            if isinstance(flowable, Paragraph):
-                text = flowable.getPlainText()
-                style = flowable.style.name
-                if style == 'ChapterTitle':
-                    # Level 0 for chapters
-                    toc.addEntry(0, text, doc.canv.getPageNumber())
-                elif style == 'SubsectionTitle':
-                    # Level 1 for subsections
-                    toc.addEntry(1, text, doc.canv.getPageNumber())
-        
-        # Assign the after_flowable callback to the DocTemplate instance
-        doc.afterFlowable = after_flowable
-        
+        story.append(Paragraph(self.title, styles['TitleCentered']))
+        story.append(Spacer(1, 12))
+
+        # Add Table of Contents
+        story.append(Paragraph("", styles['TOCHeader']))
+        story.append(doc.toc)
+        story.append(PageBreak())
+
         # Add chapters and subsections
         for chapter_title, chapter_data in self.chapters.items():
             # Add chapter title
             chapter_para = Paragraph(chapter_title, styles['ChapterTitle'])
-            elements.append(chapter_para)
-            elements.append(Spacer(1, 12))
-            
+            story.append(chapter_para)
+            story.append(Spacer(1, 12))
+
             for subsection_title, subsection_data in chapter_data["subsections"].items():
                 # Add subsection title
                 subsection_para = Paragraph(subsection_title, styles['SubsectionTitle'])
-                elements.append(subsection_para)
-                elements.append(Spacer(1, 6))
-                
+                story.append(subsection_para)
+                story.append(Spacer(1, 6))
+
                 # Add subsection content
                 content = subsection_data['content'].replace('\n', '<br/>')  # Preserve line breaks
                 content_para = Paragraph(content, styles['Content'])
-                elements.append(content_para)
-                elements.append(Spacer(1, 12))
-            
+                story.append(content_para)
+                story.append(Spacer(1, 12))
+
             # Add a page break after each chapter
-            elements.append(PageBreak())
-        
+            story.append(PageBreak())
+
         # Define the page numbering callback
         def add_page_number(canvas_obj, doc_obj):
             """Add page number to the footer of each page, centered at the bottom."""
@@ -465,12 +464,14 @@ class BookOpenAI:
             page_width = letter[0]  # Width of the page
             canvas_obj.drawCentredString(page_width / 2.0, 0.5 * inch, page_number_text)
             canvas_obj.restoreState()
-        
-        # Assign the page numbering callback
-        doc.build(
-            elements,
-            onFirstPage=add_page_number,
-            onLaterPages=add_page_number
-        )
-        
+
+        # Assign the page numbering callback using multiBuild
+        try:
+            doc.multiBuild(
+                story
+            )
+        except TypeError as te:
+            logging.error(f"Error during PDF build: {te}")
+            raise te
+
         logging.info(f"PDF saved successfully as {filename} in {time.time() - start_time:.2f} seconds")
