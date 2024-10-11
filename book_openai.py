@@ -68,6 +68,19 @@ def clean_content(content):
     
     return content
 
+# Helper Function to Strip 'Chapter N:' Prefix
+def strip_chapter_prefix(chapter_title):
+    """
+    Remove the 'Chapter N:' prefix from a chapter title.
+
+    Args:
+        chapter_title (str): The original chapter title.
+
+    Returns:
+        str: The cleaned chapter title without the prefix.
+    """
+    return re.sub(r'^Chapter\s+\d+:\s*', '', chapter_title, flags=re.IGNORECASE)
+
 # Page Numbering Function
 def add_page_number(canvas_obj, doc_obj):
     """Add page number to the footer of each page, centered at the bottom."""
@@ -438,7 +451,7 @@ Writing style: '{self.writing_style}'\
             alignment=TA_CENTER
         ))
 
-        # Subsection Title Style - Left aligned
+        # Subsection Title Style - Center aligned
         styles.add(ParagraphStyle(
             name='SubsectionTitle',
             parent=styles['Heading2'],
@@ -446,7 +459,7 @@ Writing style: '{self.writing_style}'\
             leading=18,
             spaceBefore=12,
             spaceAfter=6,
-            alignment=TA_LEFT  # Change to TA_CENTER if you prefer centered subsections
+            alignment=TA_CENTER  # Changed from TA_LEFT to TA_CENTER
         ))
 
         # Content Style - Justified
@@ -471,10 +484,22 @@ Writing style: '{self.writing_style}'\
         story.append(doc.toc)
         story.append(PageBreak())
 
+        # Flag to track the first chapter
+        first_chapter = True
+
         # Add chapters and subsections
         for chapter_title, chapter_data in self.chapters.items():
+            if not first_chapter:
+                # Add a page break before the chapter
+                story.append(PageBreak())
+            else:
+                first_chapter = False  # First chapter is already after the TOC
+
+            # Clean chapter title by removing 'Chapter N:'
+            cleaned_chapter_title = strip_chapter_prefix(chapter_title)
+
             # Add chapter title
-            chapter_para = Paragraph(chapter_title, styles['ChapterTitle'])
+            chapter_para = Paragraph(cleaned_chapter_title, styles['ChapterTitle'])
             story.append(chapter_para)
             story.append(Spacer(1, 12))
 
