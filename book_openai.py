@@ -14,7 +14,9 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import inch, cm
 from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_JUSTIFY
 from reportlab.lib import colors
+from reportlab.pdfgen import canvas
 import time
+import re
 
 # Load environment variables
 load_dotenv(Path("./api_key.env"))
@@ -44,7 +46,39 @@ class Subsections(BaseModel):
 class SubsectionContent(BaseModel):
     content: str
 
-# Custom DocTemplate
+# Content Cleaning Function
+def clean_content(content):
+    """
+    Remove lines starting with '###' and empty lines from the content.
+    
+    Args:
+        content (str): The raw content string.
+    
+    Returns:
+        str: The cleaned content string.
+    """
+    # Remove lines starting with '###'
+    content = re.sub(r'^###.*$', '', content, flags=re.MULTILINE)
+    
+    # Remove empty lines
+    content = re.sub(r'\n\s*\n', '\n', content)
+    
+    # Strip leading/trailing whitespace
+    content = content.strip()
+    
+    return content
+
+# Page Numbering Function
+def add_page_number(canvas_obj, doc_obj):
+    """Add page number to the footer of each page, centered at the bottom."""
+    canvas_obj.saveState()
+    page_number_text = f"{doc_obj.page}"
+    canvas_obj.setFont('Helvetica', 10)
+    page_width = letter[0]  # Width of the page
+    canvas_obj.drawCentredString(page_width / 2.0, 0.5 * inch, page_number_text)
+    canvas_obj.restoreState()
+
+# Custom DocTemplate with Page Numbering
 class MyDocTemplate(BaseDocTemplate):
     def __init__(self, filename, **kw):
         super().__init__(filename, **kw)
@@ -90,6 +124,10 @@ class MyDocTemplate(BaseDocTemplate):
                 self.notify('TOCEntry', (0, text, self.page))
             elif style == 'SubsectionTitle':
                 self.notify('TOCEntry', (1, text, self.page))
+
+    def handle_pageBegin(self):
+        super().handle_pageBegin()
+        add_page_number(self.canv, self)
 
 class BookOpenAI:
     def __init__(self, model_name="gpt-4o-mini", target_language="english"):
@@ -429,7 +467,7 @@ Writing style: '{self.writing_style}'\
         story.append(Spacer(1, 12))
 
         # Add Table of Contents
-        story.append(Paragraph("", styles['TOCHeader']))
+        story.append(Paragraph("", styles['TOCHeader']))  # Empty paragraph to adjust spacing
         story.append(doc.toc)
         story.append(PageBreak())
 
@@ -446,26 +484,16 @@ Writing style: '{self.writing_style}'\
                 story.append(subsection_para)
                 story.append(Spacer(1, 6))
 
+                # Clean subsection content
+                raw_content = subsection_data['content']
+                cleaned_content = clean_content(raw_content)
+
                 # Add subsection content
-                content = subsection_data['content'].replace('\n', '<br/>')  # Preserve line breaks
-                content_para = Paragraph(content, styles['Content'])
+                content_para = Paragraph(cleaned_content.replace('\n', '<br/>'), styles['Content'])
                 story.append(content_para)
                 story.append(Spacer(1, 12))
 
-            # Add a page break after each chapter
-            story.append(PageBreak())
-
-        # Define the page numbering callback
-        def add_page_number(canvas_obj, doc_obj):
-            """Add page number to the footer of each page, centered at the bottom."""
-            canvas_obj.saveState()
-            page_number_text = f"{doc_obj.page}"
-            canvas_obj.setFont('Helvetica', 10)
-            page_width = letter[0]  # Width of the page
-            canvas_obj.drawCentredString(page_width / 2.0, 0.5 * inch, page_number_text)
-            canvas_obj.restoreState()
-
-        # Assign the page numbering callback using multiBuild
+        # Assign the page numbering callback implicitly via handle_pageBegin
         try:
             doc.multiBuild(
                 story
