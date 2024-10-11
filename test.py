@@ -13,13 +13,14 @@ def main():
     description = "Exploring the potential of artificial intelligence in various fields."
     writing_style = "Conversational"
     n_chapters = 2
+    n_subsections = 2
 
     # Generate chapters
     chapters = book_generator.generate_chapters(title, description, writing_style, n_chapters)
     logging.info(f"Generated Chapters: {chapters}")
 
     # Generate subsections for each chapter
-    book_generator.generate_subsections(chapters)
+    book_generator.generate_subsections(chapters,n_subsections)
 
     # Generate content for each subsection
     book_generator.generate_content()

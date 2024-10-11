@@ -227,7 +227,7 @@ class BookOpenAI:
         # Prepare a summary of the book's structure to include in the context
         book_structure = ""
         for chapter_title, chapter_data in self.chapters.items():
-            book_structure += f"Chapter: {chapter_title}\n"
+            book_structure += f"{chapter_title}\n"
             for subsection_title in chapter_data["subsections"]:
                 book_structure += f"  Subsection: {subsection_title}\n"
 
@@ -282,7 +282,7 @@ class BookOpenAI:
                     if total_tokens <= max_tokens:
                         break
                     # Remove the oldest message if over the limit
-                    if len(context_messages) > 4:
+                    elif len(context_messages) > 4:
                         context_messages.pop(0)
                     else:
                         # Can't remove more messages; break to avoid infinite loop
@@ -411,9 +411,6 @@ class BookOpenAI:
         elements.append(Paragraph(self.title, styles['TitleCentered']))
         elements.append(Spacer(1, 12))
         
-        # Add Table of Contents Header
-        elements.append(Paragraph("Table of Contents", styles['TOCHeader']))
-        elements.append(Spacer(1, 12))
         
         # Add the Table of Contents
         elements.append(toc)
