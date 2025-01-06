@@ -221,13 +221,13 @@ class BookOpenAI:
         retries = 0
         while len(chapters) != n_chapters and retries < max_retries:
             retries += 1
-            system_message = f"Generate {n_chapters} chapter titles using the book title and description."
+            system_message = f"Generate {n_chapters} chapter titles using the book title and description in the following language: '{self.target_language}'."
             user_prompt = f"Book Title: '{title}'\nDescription: '{description}'"
 
             # Translate prompts if necessary
-            if self.target_language != "english":
-                system_message = self.translate(system_message, source_language="english")
-                user_prompt = self.translate(user_prompt, source_language="english")
+            #if self.target_language != "english":
+            #    system_message = self.translate(system_message, source_language="english")
+            #    user_prompt = self.translate(user_prompt, source_language="english")
 
             completion = self.client.beta.chat.completions.parse(
                 model=self.model_name,
@@ -277,13 +277,13 @@ class BookOpenAI:
 
             while len(subsections) != n_subsections and retries < max_retries:
                 retries += 1
-                system_message = f"Generate {n_subsections} subsections for chapter titled '{chapter.title}'."
+                system_message = f"Generate {n_subsections} subsections for chapter titled '{chapter.title}' in the following language: '{self.target_language}'."
                 user_prompt = f"Chapter Title: {chapter.title}\nChapter Description: {self.chapters[chapter.title]['description']}"
 
                 # Translate prompts if necessary
-                if self.target_language != "english":
-                    system_message = self.translate(system_message, source_language="english")
-                    user_prompt = self.translate(user_prompt, source_language="english")
+                #if self.target_language != "english":
+                    #system_message = self.translate(system_message, source_language="english")
+                    #user_prompt = self.translate(user_prompt, source_language="english")
 
                 completion = self.client.beta.chat.completions.parse(
                     model=self.model_name,
@@ -355,8 +355,8 @@ Writing style: '{self.writing_style}'\
 """
 
                 # Translate prompts if necessary
-                if self.target_language != "english":
-                    subsection_prompt = self.translate(subsection_prompt, source_language="english")
+                #if self.target_language != "english":
+                #    subsection_prompt = self.translate(subsection_prompt, source_language="english")
 
                 # Prepare messages including all previous messages and the book structure
                 context_messages = self.messages.copy()  # Start with all previous messages
@@ -365,9 +365,9 @@ Writing style: '{self.writing_style}'\
                 context_messages.append(structure_message)
 
                 # Add the system message and user prompt for the current subsection
-                system_message = "Given the information and the book structure, generate the content for the Current Subsection. Return only the subsection content."
-                if self.target_language != "english":
-                    system_message = self.translate(system_message, source_language="english")
+                system_message = f"Given the information and the book structure, generate the content in the following language: '{self.target_language}' for the Current Subsection. Return only the subsection content."
+                #if self.target_language != "english":
+                #    system_message = self.translate(system_message, source_language="english")
                 context_messages.append({"role": "system", "content": system_message})
                 context_messages.append({"role": "user", "content": subsection_prompt})
 
@@ -527,4 +527,3 @@ Writing style: '{self.writing_style}'\
             logging.error(f"Error during PDF build: {te}")
             raise te
 
-        logging.info(f"PDF saved successfully as {filename} in {time.time() - start_time:.2f} seconds")
