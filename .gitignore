@@ -1,0 +1,9 @@
+# Ignore all directories (recursively)
+*/
+
+# Ignore all hidden files (including those in the root)
+.*
+
+# Do not ignore .gitignore (and optionally .gitattributes)
+!.gitignore
+!.gitattributes

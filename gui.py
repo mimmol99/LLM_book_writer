@@ -7,9 +7,10 @@ from pathlib import Path
 import threading
 import os
 
-# Load environment variables
-load_dotenv(Path("./api_key.env"))
-os.environ["OPENAI_API_KEY"] = os.getenv("OPENAI_API_KEY")
+from dotenv import load_dotenv
+# Load environment variables from .env file
+load_dotenv()
+
 
 class BookApp:
     def __init__(self, root):

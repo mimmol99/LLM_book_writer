@@ -18,9 +18,10 @@ from reportlab.pdfgen import canvas
 import time
 import re
 
-# Load environment variables
-load_dotenv(Path("./api_key.env"))
-os.environ["OPENAI_API_KEY"] = os.getenv("OPENAI_API_KEY")
+from dotenv import load_dotenv
+# Load environment variables from .env file
+load_dotenv()
+
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
