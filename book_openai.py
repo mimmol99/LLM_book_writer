@@ -5,6 +5,7 @@ import logging
 from openai import OpenAI
 import os
 from pathlib import Path
+from pathlib import Path
 from pydantic import BaseModel
 from reportlab.lib.pagesizes import letter
 from reportlab.platypus import BaseDocTemplate, PageTemplate, Frame
@@ -17,12 +18,26 @@ from reportlab.lib import colors
 from reportlab.pdfgen import canvas
 import time
 import re
+import time
+import re
+from pydantic import BaseModel
 
-from dotenv import load_dotenv
-# Load environment variables from .env file
-load_dotenv()
+# Load environment variables - This is usually sufficient
+# Ensure './api_key.env' exists and contains OPENAI_API_KEY='...'
+load_dotenv(dotenv_path=Path("./.env"), verbose=True) # Added verbose=True for debugging
 
+# --- REMOVE THIS LINE ---
+# os.environ["OPENAI_API_KEY"] = os.getenv("OPENAI_API_KEY")
+# -----------------------
 
+# Check if the key was loaded (optional debug)
+api_key = os.getenv("OPENAI_API_KEY")
+if not api_key:
+    logging.error("ERROR: OPENAI_API_KEY not found in environment after loading .env file.")
+    # You might want to raise an exception or exit here if the key is absolutely required
+    # raise ValueError("OPENAI_API_KEY not found. Please check your ./api_key.env file.")
+else:
+    logging.info("OpenAI API Key loaded successfully.") # Confirmation
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -405,6 +420,57 @@ Writing style: '{self.writing_style}'\
 
         end_time = time.time()
         logging.info(f"Content generation completed in {end_time - start_time:.2f} seconds")
+
+
+    def save_as_txt(self, filename):
+        logging.info(f"Saving book as TXT: {filename}")
+        full_content = f"Book Title: {self.title}\n\n"
+        for i, (chapter_title, chapter_data) in enumerate(self.chapters.items()):
+            cleaned_chapter_title = strip_chapter_prefix(chapter_title) # Use your helper
+            full_content += f"--- Chapter {i+1}: {cleaned_chapter_title} ---\n\n"
+            for sub_title, sub_data in chapter_data.get("subsections", {}).items():
+                full_content += f"--- Subsection: {sub_title} ---\n"
+                content = sub_data.get('content', 'Content not generated.')
+                cleaned_content = clean_content(content) # Use your helper
+                full_content += f"{cleaned_content}\n\n"
+            full_content += "\n"
+
+        try:
+            with open(filename, 'w', encoding='utf-8') as f:
+                f.write(full_content)
+            logging.info("TXT file saved successfully.")
+        except Exception as e:
+            logging.error(f"Error saving TXT file: {e}")
+            raise # Re-raise the exception
+
+    def save_as_docx(self, filename):
+        from docx import Document # Import inside method or at top
+        from docx.shared import Inches
+
+        logging.info(f"Saving book as DOCX: {filename}")
+        document = Document()
+        document.add_heading(self.title, level=0) # Book Title
+
+        for i, (chapter_title, chapter_data) in enumerate(self.chapters.items()):
+            cleaned_chapter_title = strip_chapter_prefix(chapter_title) # Use your helper
+            document.add_heading(f"Chapter {i+1}: {cleaned_chapter_title}", level=1) # Chapter Title
+
+            for sub_title, sub_data in chapter_data.get("subsections", {}).items():
+                document.add_heading(sub_title, level=2) # Subsection Title
+                content = sub_data.get('content', 'Content not generated.')
+                cleaned_content = clean_content(content) # Use your helper
+                document.add_paragraph(cleaned_content) # Add content
+
+            # Add a page break after each chapter except the last
+            if i < len(self.chapters) - 1:
+                document.add_page_break()
+
+        try:
+            document.save(filename)
+            logging.info("DOCX file saved successfully.")
+        except Exception as e:
+            logging.error(f"Error saving DOCX file: {e}")
+            raise # Re-raise the exception
 
     def save_as_pdf(self, filename):
         """
