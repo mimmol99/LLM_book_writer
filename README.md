@@ -16,7 +16,7 @@ Save all the content in txt,PDF or docx format.
 # Usage
 
 ```bash
-python3 gui.py
+python3 app_gradio.py.py
 ```
 
 A simple gui where to insert title and description.
