@@ -42,6 +42,10 @@ else:
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # Define data models
+
+class Language(BaseModel):
+    language: str
+
 class Translation(BaseModel):
     translation: str
 
@@ -174,29 +178,21 @@ class BookOpenAI:
         self.title = ""
         self.description = ""
         self.writing_style = ""
-        self.target_language = target_language.lower() if target_language else "english"  # Ensure lowercase
-
-    def translate(self, prompt, source_language="english", target=None):
+        
+    def extract_n_chapters(self, text):
         """
-        Translate text from source_language to target language.
+        Extract the number of chapters from the text.
 
         Args:
-            prompt (str): The text to translate.
-            source_language (str): The language of the input text.
-            target (str): The language to translate to. If None, uses self.target_language.
+            text (str): The text from which to extract the number of chapters.
 
         Returns:
-            str: Translated text.
+            int: The extracted number of chapters.
         """
-        target = target or self.target_language
-        if target == source_language.lower():
-            return prompt  # No translation needed
-
-        translate_prompt = f"Translate from {source_language} to {target}: '{prompt}'."
-
+        prompt = f"Extract the number of chapters from the following text: '{text}'"
         messages = [
-            {"role": "system", "content": "You are a translator assistant."},
-            {"role": "user", "content": translate_prompt}
+            {"role": "system", "content": "You are a chapter extraction assistant."},
+            {"role": "user", "content": prompt}
         ]
 
         try:
@@ -204,15 +200,39 @@ class BookOpenAI:
                 model=self.model_name,
                 temperature=1,
                 messages=messages,
-                response_format=Translation,
+                response_format=Chapters,
             )
-            translation = completion.choices[0].message.parsed.translation
-            return translation
+            n_chapters = completion.choices[0].message.parsed.chapters
+            logging.info(f"Extracted number of chapters: {n_chapters}")
+            return n_chapters
         except Exception as e:
-            logging.error(f"Translation failed: {e}")
-            return prompt  # Fallback to original prompt if translation fails
+            logging.error(f"Chapter extraction failed: {e}")
+            return None
+    def extract_language(self, text):
 
-    def generate_chapters(self, title, description, writing_style, n_chapters):
+
+        prompt = f"Extract the language from the following text: '{text}'"
+        messages = [
+            {"role": "system", "content": "You are a language extraction assistant."},
+            {"role": "user", "content": prompt}
+        ]
+
+
+        try:
+            completion = self.client.beta.chat.completions.parse(
+                model=self.model_name,
+                temperature=1,
+                messages=messages,
+                response_format=Language,
+            )
+            language = completion.choices[0].message.parsed.language
+            logging.info(f"Extracted language: {language}")
+            return language
+        except Exception as e:
+            logging.error(f"Language extraction failed: {e}")
+            return None
+
+    def generate_chapters(self, title, description, writing_style):
         """
         Generate chapters for the book based on the title and description.
 
@@ -220,31 +240,27 @@ class BookOpenAI:
             title (str): The title of the book.
             description (str): The description of the book.
             writing_style (str): The writing style to use.
-            n_chapters (int): The number of chapters to generate.
         """
         logging.info("Starting chapter generation...")
         self.title = title
         self.description = description
+
+        self.target_language = self.extract_language(description) or self.extract_language(title)
+        if not self.target_language:
+            logging.error("Failed to extract language from title or description.")
+            return None
+
         self.writing_style = writing_style
 
         self.messages = []  # Clear previous messages
 
         start_time = time.time()
 
-        # Loop until the exact number of chapters is generated
-        chapters = []
-        max_retries = 5  # Set a maximum number of retries to prevent infinite loops
-        retries = 0
-        while len(chapters) != n_chapters and retries < max_retries:
-            retries += 1
-            system_message = f"Generate {n_chapters} chapter titles using the book title and description in the following language: '{self.target_language}'."
-            user_prompt = f"Book Title: '{title}'\nDescription: '{description}'"
+        # Ask the model to generate all necessary chapters
+        system_message = f"Generate chapter titles using the book title and description in the following language: '{self.target_language}'."
+        user_prompt = f"Book Title: '{title}'\nDescription: '{description}'"
 
-            # Translate prompts if necessary
-            #if self.target_language != "english":
-            #    system_message = self.translate(system_message, source_language="english")
-            #    user_prompt = self.translate(user_prompt, source_language="english")
-
+        try:
             completion = self.client.beta.chat.completions.parse(
                 model=self.model_name,
                 messages=[
@@ -255,15 +271,11 @@ class BookOpenAI:
             )
 
             chapters = completion.choices[0].message.parsed.chapters
-            if len(chapters) != n_chapters:
-                logging.warning(f"Expected {n_chapters} chapters, but got {len(chapters)}. Retrying...")
-
-        if len(chapters) != n_chapters:
-            logging.error(f"Failed to generate exactly {n_chapters} chapters after {max_retries} retries.")
-            # Handle the error as needed, e.g., raise an exception or accept the closest result
-            # For this example, we'll accept the closest result
-        else:
             logging.info(f"Chapters generated in {time.time() - start_time:.2f} seconds")
+
+        except Exception as e:
+            logging.error(f"Failed to generate chapters: {e}")
+            return None
 
         logging.debug(f"Chapters: {chapters}")
 
@@ -274,13 +286,12 @@ class BookOpenAI:
 
         return chapters
 
-    def generate_subsections(self, chapters, n_subsections=3):
+    def generate_subsections(self, chapters):
         """
-        Generate subsections for each chapter.
+        Generate all necessary subsections for each chapter.
 
         Args:
             chapters (list): A list of chapter titles.
-            n_subsections (int): The number of subsections to generate for each chapter.
         """
         for chapter in chapters:
             logging.info(f"Generating subsections for chapter: {chapter.title}")
@@ -288,19 +299,11 @@ class BookOpenAI:
 
             self.messages = []  # Clear previous messages for subsections
             subsections = []
-            max_retries = 5  # Set a maximum number of retries
-            retries = 0
 
-            while len(subsections) != n_subsections and retries < max_retries:
-                retries += 1
-                system_message = f"Generate {n_subsections} subsections for chapter titled '{chapter.title}' in the following language: '{self.target_language}'."
-                user_prompt = f"Chapter Title: {chapter.title}\nChapter Description: {self.chapters[chapter.title]['description']}"
+            system_message = f"Generate subsections for the chapter titled '{chapter.title}' in the following language: '{self.target_language}'."
+            user_prompt = f"Chapter Title: {chapter.title}\nChapter Description: {self.chapters[chapter.title]['description']}"
 
-                # Translate prompts if necessary
-                #if self.target_language != "english":
-                    #system_message = self.translate(system_message, source_language="english")
-                    #user_prompt = self.translate(user_prompt, source_language="english")
-
+            try:
                 completion = self.client.beta.chat.completions.parse(
                     model=self.model_name,
                     messages=[
@@ -312,12 +315,9 @@ class BookOpenAI:
 
                 subsections = completion.choices[0].message.parsed.subsections
 
-                if len(subsections) != n_subsections:
-                    logging.warning(f"Expected {n_subsections} subsections, but got {len(subsections)}. Retrying...")
-
-            if len(subsections) != n_subsections:
-                logging.error(f"Failed to generate exactly {n_subsections} subsections for chapter '{chapter.title}' after {max_retries} retries.")
-                # You may choose to raise an error or handle this case as needed.
+            except Exception as e:
+                logging.error(f"Failed to generate subsections for chapter '{chapter.title}': {e}")
+                continue
 
             end_time = time.time()
             logging.info(f"Subsections for chapter '{chapter.title}' generated in {end_time - start_time:.2f} seconds")
@@ -370,9 +370,6 @@ Current Subsection Description: '{subsection_description}'
 Writing style: '{self.writing_style}'\
 """
 
-                # Translate prompts if necessary
-                #if self.target_language != "english":
-                #    subsection_prompt = self.translate(subsection_prompt, source_language="english")
 
                 # Prepare messages including all previous messages and the book structure
                 context_messages = self.messages.copy()  # Start with all previous messages
@@ -382,8 +379,7 @@ Writing style: '{self.writing_style}'\
 
                 # Add the system message and user prompt for the current subsection
                 system_message = f"Given the information and the book structure, generate the content in the following language: '{self.target_language}' for the Current Subsection. Return only the subsection content."
-                #if self.target_language != "english":
-                #    system_message = self.translate(system_message, source_language="english")
+
                 context_messages.append({"role": "system", "content": system_message})
                 context_messages.append({"role": "user", "content": subsection_prompt})
 
@@ -474,123 +470,102 @@ Writing style: '{self.writing_style}'\
 
     def save_as_pdf(self, filename):
         """
-        Save the generated book as a PDF file with a dynamic Table of Contents.
+        Save the generated book as a PDF file with a dynamic Table of Contents
+        and support for **bold** text. # <--- Updated docstring
 
         Args:
             filename (str): The name of the PDF file to save.
         """
         logging.info(f"Saving book as PDF: {filename}")
+        if not self.chapters:
+             logging.error("Cannot save PDF: No chapters generated.")
+             raise ValueError("No chapters generated to save.")
+
         start_time = time.time()
-
-        # Initialize the custom DocTemplate
-        doc = MyDocTemplate(
-            filename,
-            pagesize=letter
-        )
-
-        # Define styles
+        doc = MyDocTemplate(filename, pagesize=letter)
         styles = getSampleStyleSheet()
 
+        # --- Add your custom ParagraphStyles here (TitleCentered, TOCHeader, etc.) ---
+        # (Keep the style definitions as they were)
         # Title Style - Centered
         styles.add(ParagraphStyle(
-            name='TitleCentered',
-            parent=styles['Title'],
-            alignment=TA_CENTER,
-            spaceAfter=24
+            name='TitleCentered', parent=styles['Title'], alignment=TA_CENTER, spaceAfter=24
         ))
-
         # TOC Header - Left aligned
         styles.add(ParagraphStyle(
-            name='TOCHeader',
-            parent=styles['Heading1'],
-            alignment=TA_LEFT,
-            spaceAfter=12
+            name='TOCHeader', parent=styles['Heading1'], alignment=TA_LEFT, spaceAfter=12
         ))
-
         # Chapter Title Style - Centered
         styles.add(ParagraphStyle(
-            name='ChapterTitle',
-            parent=styles['Heading1'],
-            fontSize=18,
-            leading=22,
-            spaceBefore=12,
-            spaceAfter=12,
-            alignment=TA_CENTER
+            name='ChapterTitle', parent=styles['Heading1'], fontSize=18, leading=22,
+            spaceBefore=12, spaceAfter=12, alignment=TA_CENTER
         ))
-
         # Subsection Title Style - Center aligned
         styles.add(ParagraphStyle(
-            name='SubsectionTitle',
-            parent=styles['Heading2'],
-            fontSize=14,
-            leading=18,
-            spaceBefore=12,
-            spaceAfter=6,
-            alignment=TA_CENTER  # Changed from TA_LEFT to TA_CENTER
+            name='SubsectionTitle', parent=styles['Heading2'], fontSize=14, leading=18,
+            spaceBefore=12, spaceAfter=6, alignment=TA_CENTER
         ))
-
         # Content Style - Justified
         styles.add(ParagraphStyle(
-            name='Content',
-            parent=styles['BodyText'],
-            fontSize=12,
-            leading=15,
-            spaceAfter=12,
-            alignment=TA_JUSTIFY
+            name='Content', parent=styles['BodyText'], fontSize=12, leading=15,
+            spaceAfter=12, alignment=TA_JUSTIFY
         ))
+        # --- End Style Definitions ---
 
-        # Container for the PDF elements
         story = []
-
-        # Add Book Title
         story.append(Paragraph(self.title, styles['TitleCentered']))
         story.append(Spacer(1, 12))
-
-        # Add Table of Contents
-        story.append(Paragraph("", styles['TOCHeader']))  # Empty paragraph to adjust spacing
+        story.append(Paragraph("Table of Contents", styles['TOCHeader'])) # Changed empty "" to actual text
         story.append(doc.toc)
         story.append(PageBreak())
 
-        # Flag to track the first chapter
         first_chapter = True
-
-        # Add chapters and subsections
-        for chapter_title, chapter_data in self.chapters.items():
+        for chapter_title_key, chapter_data in self.chapters.items():
             if not first_chapter:
-                # Add a page break before the chapter
                 story.append(PageBreak())
             else:
-                first_chapter = False  # First chapter is already after the TOC
+                first_chapter = False
 
-            # Clean chapter title by removing 'Chapter N:'
-            cleaned_chapter_title = strip_chapter_prefix(chapter_title)
-
-            # Add chapter title
+            cleaned_chapter_title = strip_chapter_prefix(chapter_title_key)
             chapter_para = Paragraph(cleaned_chapter_title, styles['ChapterTitle'])
             story.append(chapter_para)
             story.append(Spacer(1, 12))
 
-            for subsection_title, subsection_data in chapter_data["subsections"].items():
+            if not chapter_data.get("subsections"):
+                story.append(Paragraph("(No subsections generated for this chapter)", styles['Content']))
+                continue
+
+            # --- Process Subsections ---
+            for subsection_title_key, subsection_data in chapter_data["subsections"].items():
                 # Add subsection title
-                subsection_para = Paragraph(subsection_title, styles['SubsectionTitle'])
+                subsection_para = Paragraph(subsection_title_key, styles['SubsectionTitle'])
                 story.append(subsection_para)
                 story.append(Spacer(1, 6))
 
-                # Clean subsection content
-                raw_content = subsection_data['content']
-                cleaned_content = clean_content(raw_content)
+                # Get raw content safely
+                raw_content = subsection_data.get('content', 'Content not generated.')
 
-                # Add subsection content
-                content_para = Paragraph(cleaned_content.replace('\n', '<br/>'), styles['Content'])
+                # Clean basic unwanted lines (optional, depends if clean_content is needed)
+                cleaned_content = clean_content(raw_content) # Apply your existing cleaning
+
+                # --- Convert **markdown bold** to <b>reportlab bold</b> ---
+                formatted_content = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', cleaned_content, flags=re.DOTALL)
+                # Using DOTALL flag just in case bold text spans multiple lines, though less common
+
+                # Replace Python newlines with ReportLab <br/> tags AFTER bold conversion
+                content_for_pdf = formatted_content.replace('\n', '<br/>')
+
+                # Create the ReportLab Paragraph object
+                content_para = Paragraph(content_for_pdf, styles['Content'])
                 story.append(content_para)
                 story.append(Spacer(1, 12))
+            # --- End Subsection Loop ---
 
-        # Assign the page numbering callback implicitly via handle_pageBegin
+        # Build the PDF
         try:
-            doc.multiBuild(
-                story
-            )
-        except TypeError as te:
-            logging.error(f"Error during PDF build: {te}")
-            raise te
+            doc.multiBuild(story)
+            logging.info(f"PDF saved successfully in {time.time() - start_time:.2f} seconds.")
+        except Exception as e: # Catch generic Exception for build errors
+            logging.error(f"Error during PDF build: {e}")
+            raise # Re-raise the exception
 
