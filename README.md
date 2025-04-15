@@ -89,4 +89,3 @@ Based on a user-provided title, description, and writing style, the application:
 6.  **Find Saved Files:**
     All generated files (regardless of format) are saved locally in the `generated_books/` directory within the project folder. Filenames include the title, language code, and a timestamp corresponding to the *save time*.
 
-## File Structure
