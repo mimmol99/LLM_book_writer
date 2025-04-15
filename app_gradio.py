@@ -1,4 +1,4 @@
-# app_gradio.py (Adapted for automatic language/structure in book_openai.py)
+# app_gradio.py 
 
 import gradio as gr
 # Ensure book_openai.py is using the modified code provided by the user
