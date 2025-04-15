@@ -26,9 +26,6 @@ from pydantic import BaseModel
 # Ensure './api_key.env' exists and contains OPENAI_API_KEY='...'
 load_dotenv(dotenv_path=Path("./.env"), verbose=True) # Added verbose=True for debugging
 
-# --- REMOVE THIS LINE ---
-# os.environ["OPENAI_API_KEY"] = os.getenv("OPENAI_API_KEY")
-# -----------------------
 
 # Check if the key was loaded (optional debug)
 api_key = os.getenv("OPENAI_API_KEY")
