@@ -89,4 +89,3 @@ Based on a user-provided title, description, and writing style, the AI:
 7.  **Find Saved Files:**
     A copy of the generated book will also be saved locally in the `generated_books/` directory within the application's folder. The filename includes the title, detected language, and a timestamp (e.g., `My_Awesome_Book_en_20240515_103000.pdf`).
 
-## File Structure
