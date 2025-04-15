@@ -1,164 +1,227 @@
-# app_gradio.py 
+# app_gradio.py (Fix for ValueError: not enough output values)
 
 import gradio as gr
-# Ensure book_openai.py is using the modified code provided by the user
-from book_openai import BookOpenAI
+from book_openai import BookOpenAI # Assuming book_openai.py is correct
 from dotenv import load_dotenv
 from pathlib import Path
 import os
 import time
 import traceback
-import logging # Import logging
+import logging
 
-# Load environment variables from .env file
+# --- Setup ---
 load_dotenv()
-
-OUTPUT_DIR = "generated_books" # Directory to save generated files
-Path(OUTPUT_DIR).mkdir(parents=True, exist_ok=True) # Create output directory
+OUTPUT_DIR = "generated_books"
+Path(OUTPUT_DIR).mkdir(parents=True, exist_ok=True)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-# --- Modified Gradio function ---
-def generate_book_interface(
+# Define overall progress ranges for generation
+INIT_END = 0.05
+CHAPTERS_END = 0.15
+SUBSECTIONS_END = 0.40
+CONTENT_END = 0.95
+GENERATION_COMPLETE = 1.0
+
+
+# --- Generation Function (Corrected Yields) ---
+def generate_book_content(
     book_title,
     book_description,
     writing_style,
-    # Removed language, n_chapters, n_subsections
-    file_type,
     progress=gr.Progress(track_tqdm=True) # Gradio progress tracking
 ):
     """
-    Main function called by the Gradio interface to generate the book.
-    Relies on BookOpenAI class to internally handle language detection
-    and determine chapter/subsection counts.
+    Generates the book content and yields updates for the 4 output components.
     """
-    status_message = "Starting process...\n"
-    output_file_path = None
-    book_generator = None # Initialize to None
+    status_message = "Starting generation process...\n"
+    book_generator = None
+    # Default UI updates (hide buttons, hide download link)
+    save_row_update = gr.update(visible=False)
+    dl_link_update = gr.update(value=None, visible=False)
 
     # --- Input Validation ---
     if not all([book_title, book_description, writing_style]):
-        # Use yield to update the status message correctly in Gradio
-        yield "Error: Please fill in Title, Description, and Writing Style.", None
-        return # Stop execution
+        status_message = "Error: Please fill in Title, Description, and Writing Style."
+        # Return 4 values for the 4 outputs
+        return status_message, save_row_update, dl_link_update, None
 
     try:
         # --- Step 1: Initialize Generator ---
-        progress(0.1, desc="Initializing Generator")
+        progress(0, desc="Initializing Generator...")
         status_message += "Initializing generator...\n"
-        yield status_message, None
-        # The __init__ might still take target_language, but generate_chapters overwrites it
-        book_generator = BookOpenAI(model_name="gpt-4o-mini")
+        # Yield 4 values
+        yield status_message, save_row_update, dl_link_update, None
+        book_generator = BookOpenAI()
+        if not book_generator.client:
+             raise ConnectionError("Failed to initialize OpenAI client (Check API Key?).")
+        progress(INIT_END, desc="Generator Initialized.")
+        status_message += "Generator initialized.\n"
+        # Yield 4 values
+        yield status_message, save_row_update, dl_link_update, None
 
-        # --- Step 2: Generate Chapters (Handles Language Detection Internally) ---
-        progress(0.3, desc="Generating Chapters (Language Detected Internally)")
+        # --- Step 2: Generate Chapters ---
+        progress(INIT_END, desc="Generating Chapters Outline...")
         status_message += "Generating chapters (detecting language internally)...\n"
-        yield status_message, None
-        # This method now returns the chapter list *and* sets self.target_language
+        # Yield 4 values
+        yield status_message, save_row_update, dl_link_update, None
         chapters_data = book_generator.generate_chapters(
             book_title, book_description, writing_style
         )
-        # Check if chapter generation failed (e.g., language detection failed)
         if chapters_data is None:
-            status_message += "Error: Failed to generate chapters (possibly language detection failure).\n"
-            yield status_message, None
-            return # Stop execution
-        status_message += f"Language '{book_generator.target_language}' used. Chapters generated ({len(chapters_data)} chapters determined by AI).\n"
-        yield status_message, None
+            status_message += "Error: Failed to generate chapters (check logs).\n"
+            # Yield 4 values on error
+            yield status_message, save_row_update, dl_link_update, None
+            return # Stop generation
+        total_chapters = len(chapters_data)
+        progress(CHAPTERS_END, desc=f"Outline Generated ({total_chapters} Chapters)")
+        status_message += f"Language '{book_generator.target_language}' used. Outline: {total_chapters} chapters.\n"
+        # Yield 4 values
+        yield status_message, save_row_update, dl_link_update, None
 
-        # --- Step 3: Generate Subsections (Determined by AI) ---
-        progress(0.6, desc="Generating Subsections (Determined by AI)")
-        status_message += "Generating subsections for each chapter (determined by AI)...\n"
-        yield status_message, None
-        # Pass the returned chapter objects to generate_subsections
-        book_generator.generate_subsections(chapters_data)
+        # --- Step 3: Generate Subsections (with Progress Callback) ---
+        status_message += "Generating subsections for each chapter...\n"
+        # Yield 4 values
+        yield status_message, save_row_update, dl_link_update, None
+        def update_subsection_progress(current_chapter_idx, total_chapters_cb):
+            overall_fraction = CHAPTERS_END + ((current_chapter_idx + 1) / total_chapters_cb) * (SUBSECTIONS_END - CHAPTERS_END)
+            desc = f"Generating Subsections: Ch {current_chapter_idx + 1}/{total_chapters_cb}"
+            progress(overall_fraction, desc=desc)
+
+        book_generator.generate_subsections(chapters_data, progress_callback=update_subsection_progress)
+        progress(SUBSECTIONS_END, desc="Subsections Generated.")
         status_message += "Subsections generated.\n"
-        yield status_message, None
+        # Yield 4 values
+        yield status_message, save_row_update, dl_link_update, None
 
-        # --- Step 4: Generate Content ---
-        progress(0.8, desc="Generating Content")
+        # --- Step 4: Generate Content (with Progress Callback) ---
         status_message += "Generating content (this may take a while)...\n"
-        yield status_message, None
-        book_generator.generate_content() # Modifies internal state
+        # Yield 4 values
+        yield status_message, save_row_update, dl_link_update, None
+        try: total_subsections = sum(len(data.get("subsections", {})) for data in book_generator.chapters.values())
+        except Exception: total_subsections = 0
+        def update_content_progress(proc_count, total_count, ch_idx, tot_ch, sub_idx, tot_sub_in_ch):
+            if total_count > 0: overall_fraction = SUBSECTIONS_END + (proc_count / total_count) * (CONTENT_END - SUBSECTIONS_END)
+            else: overall_fraction = CONTENT_END
+            desc = f"Content: Ch {ch_idx+1}/{tot_ch}, Sub {sub_idx+1}/{tot_sub_in_ch} ({proc_count}/{total_count})"
+            progress(overall_fraction, desc=desc)
+
+        if total_subsections > 0: book_generator.generate_content(progress_callback=update_content_progress)
+        else: status_message += "Skipping content generation: No subsections found.\n"
+
+        progress(CONTENT_END, desc="Content Generation Complete.")
         status_message += "Content generation complete.\n"
-        yield status_message, None
+        status_message += "\n>>> Select a format below to save the book. <<<"
+        # Yield 4 values - Keep buttons hidden until the *final* yield/return
+        yield status_message, save_row_update, dl_link_update, None
 
-        # --- Step 5: Save File ---
-        progress(0.9, desc=f"Saving as {file_type}")
-        status_message += f"Saving book as {file_type}...\n"
-        yield status_message, None
-
-        # Create filename (ensure book_generator has title/language set)
-        safe_title = "".join(c for c in book_generator.title if c.isalnum() or c in (' ', '_')).rstrip()
-        timestamp = time.strftime("%Y%m%d_%H%M%S")
-        # Use target_language from the generator instance
-        lang = book_generator.target_language # Should be set by generate_chapters
-        if not lang: # Fallback just in case
-             lang = "unknown_lang"
-             status_message += "Warning: Target language was not set properly, using default filename.\n"
-
-        base_filename = f"{safe_title}_{lang}_{timestamp}"
-
-        file_extensions = { "PDF": ".pdf", "TXT": ".txt", "DOCX": ".docx" }
-        extension = file_extensions.get(file_type, ".pdf")
-        output_file_path = os.path.join(OUTPUT_DIR, f"{base_filename}{extension}")
-
-        if file_type == "PDF":
-            book_generator.save_as_pdf(output_file_path)
-        elif file_type == "TXT":
-            book_generator.save_as_txt(output_file_path)
-        elif file_type == "DOCX":
-            book_generator.save_as_docx(output_file_path)
-
-        status_message += f"Book saved successfully: {output_file_path}\n"
-        progress(1.0, desc="Completed")
-        yield status_message, output_file_path # Final update
+        # --- Generation Finished ---
+        progress(GENERATION_COMPLETE, desc="Generation Ready!")
+        # Final yield: Update status, SHOW save buttons, keep download link hidden, return generator state
+        yield status_message, gr.update(visible=True), dl_link_update, book_generator
 
     except Exception as e:
-        error_message = f"An error occurred: {str(e)}"
-        logging.error(f"Error in Gradio interface: {error_message}", exc_info=True) # Log full traceback
-        # Return error message to status and None for file path
-        yield f"{status_message}\n\n-------------------\nERROR:\n{error_message}\n-------------------", None
+        error_message = f"Generation Error: {str(e)}\n{traceback.format_exc()}"
+        logging.error(f"Error during generation: {error_message}", exc_info=True)
+        progress(1.0, desc="Generation Failed")
+        # Yield 4 values on general error
+        yield f"{status_message}\n\nERROR:\n{error_message}", gr.update(visible=False), gr.update(value=None, visible=False), None
 
 
-# --- Define Gradio Components (Inputs Modified) ---
-input_title = gr.Textbox(label="Book Title", placeholder="Enter the title of the book")
-input_description = gr.Textbox(label="Book Description", lines=5, placeholder="Describe the book's content and purpose (language will be detected from this)")
-input_style = gr.Textbox(label="Writing Style", placeholder="e.g., Academic, Narrative, Technical, Humorous")
-# REMOVED: input_language
-# REMOVED: input_chapters
-# REMOVED: input_subsections
-input_filetype = gr.Dropdown(["PDF", "TXT", "DOCX"], label="Save as", value="PDF")
+# --- Save Action Function (Same as before) ---
+def save_book_file(generator_state, format_type):
+    """Saves the book from the state object in the specified format."""
+    if generator_state is None:
+        return "Error: No generated book content found. Please generate first.", gr.update(value=None, visible=False) # Return 2 values for outputs
 
-# --- Define Gradio Outputs (Unchanged) ---
-output_status = gr.Textbox(label="Status / Log", lines=10, interactive=False)
-output_file = gr.File(label="Download Generated Book")
+    book_generator = generator_state
+    status_message = f"Saving as {format_type}...\n"
+    output_file_path = None
 
-# --- Create the Gradio Interface (Inputs List Modified) ---
-iface = gr.Interface(
-    fn=generate_book_interface,
-    inputs=[
-        input_title,
-        input_description,
-        input_style,
-        # Removed language, chapters, subsections
-        input_filetype
-    ],
-    outputs=[
-        output_status,
-        output_file
-    ],
-    title="AI Book Generator (Auto Language/Structure)",
-    description="Enter details to generate a book using OpenAI. Language and chapter/subsection structure are determined automatically by the AI.",
-    flagging_mode="never", # Use updated parameter
-)
+    try:
+        # Create filename
+        if not book_generator.title: safe_title = "Untitled_Book"
+        else: safe_title = "".join(c for c in book_generator.title if c.isalnum() or c in (' ', '_')).rstrip().replace(" ", "_")
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        lang = book_generator.target_language if book_generator.target_language else "unk"
+        base_filename = f"{safe_title}_{lang}_{timestamp}"
+        file_extensions = { "PDF": ".pdf", "TXT": ".txt", "DOCX": ".docx" }
+        extension = file_extensions.get(format_type, ".txt")
+        output_file_path = os.path.join(OUTPUT_DIR, f"{base_filename}{extension}")
+        logging.info(f"Attempting to save to: {output_file_path}")
 
-# --- Launch the Interface ---
+        # Call save method
+        if format_type == "PDF": book_generator.save_as_pdf(output_file_path)
+        elif format_type == "TXT": book_generator.save_as_txt(output_file_path)
+        elif format_type == "DOCX": book_generator.save_as_docx(output_file_path)
+        else: raise ValueError(f"Unsupported format type: {format_type}")
+
+        status_message += f"Book saved successfully: {output_file_path}"
+        logging.info(f"Save successful: {output_file_path}")
+        # Return status update and visible download link
+        return status_message, gr.update(value=output_file_path, visible=True) # Return 2 values for outputs
+
+    except Exception as e:
+        error_message = f"Save Error ({format_type}): {str(e)}\n{traceback.format_exc()}"
+        logging.error(f"Error saving file as {format_type}: {error_message}", exc_info=True)
+        # Return error status and hide download link
+        return f"{status_message}\n\nERROR:\n{error_message}", gr.update(value=None, visible=False) # Return 2 values for outputs
+
+
+# --- Build Gradio Interface (Same as before) ---
+with gr.Blocks() as iface:
+    gr.Markdown("# AI Book Generator (Auto Language/Structure)")
+    gr.Markdown("Enter details, generate the book content, then choose format(s) to save.")
+
+    generator_state = gr.State(value=None) # Holds BookOpenAI object
+
+    with gr.Row():
+        with gr.Column(scale=1):
+            input_title = gr.Textbox(label="Book Title", placeholder="Enter the title")
+            input_description = gr.Textbox(label="Book Description", lines=5, placeholder="Describe the book (language detected from this)")
+            input_style = gr.Textbox(label="Writing Style", placeholder="e.g., Academic, Narrative, Technical")
+            btn_generate = gr.Button("1. Generate Book Content", variant="primary")
+        with gr.Column(scale=1):
+            output_status = gr.Textbox(label="Status / Log", lines=10, interactive=False)
+            with gr.Row(visible=False) as save_options_row:
+                 gr.Markdown("2. Save Generated Content As:")
+                 btn_save_pdf = gr.Button("PDF")
+                 btn_save_txt = gr.Button("TXT")
+                 btn_save_docx = gr.Button("DOCX")
+            output_dl_link = gr.File(label="Download Last Saved Book", visible=False)
+
+    # --- Connect Generate Button ---
+    btn_generate.click(
+        fn=generate_book_content,
+        inputs=[input_title, input_description, input_style],
+        # Outputs MUST match the number of yielded/returned values in ALL paths
+        outputs=[output_status, save_options_row, output_dl_link, generator_state]
+    )
+
+    # --- Connect Save Buttons ---
+    # These expect 2 return values from save_book_file for the 2 outputs
+    btn_save_pdf.click(
+        fn=save_book_file,
+        inputs=[generator_state, gr.Textbox("PDF", visible=False)],
+        outputs=[output_status, output_dl_link]
+    )
+    btn_save_txt.click(
+        fn=save_book_file,
+        inputs=[generator_state, gr.Textbox("TXT", visible=False)],
+        outputs=[output_status, output_dl_link]
+    )
+    btn_save_docx.click(
+        fn=save_book_file,
+        inputs=[generator_state, gr.Textbox("DOCX", visible=False)],
+        outputs=[output_status, output_dl_link]
+    )
+
+# --- Launch the Interface (Same as before) ---
 if __name__ == "__main__":
     print(f"Generated books will be saved in: {os.path.abspath(OUTPUT_DIR)}")
-    print("--- About to call iface.launch() ---")
+    print("--- Launching Gradio Interface ---")
     try:
         iface.launch()
     except Exception as e:
         print(f"--- Error during iface.launch(): {e} ---")
-        traceback.print_exc() # Print full traceback if launch fails
-    print("--- iface.launch() has finished (server stopped) ---")
+        traceback.print_exc()
+    print("--- Gradio interface stopped ---")
